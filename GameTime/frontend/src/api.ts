@@ -100,6 +100,9 @@ type AppAPI = {
   PickFile(): Promise<ResolveResult>
   ResolvePath(path: string): Promise<ResolveResult>
   TakeDropPath(): Promise<string>
+  NotifyDropReady(): Promise<void>
+  DropReady(): Promise<boolean>
+  LogFromFrontend(tag: string, msg: string): Promise<void>
   ListCandidates(appid: string): Promise<ExeCandidate[] | null>
   AddGame(g: Partial<Game>): Promise<Game>
   UpdateGame(g: Game): Promise<Game>
@@ -119,6 +122,11 @@ declare global {
   interface Window {
     go?: { main?: { App?: AppAPI } }
     runtime?: {
+      OnFileDrop?: (
+        cb: (x: number, y: number, paths: string[]) => void,
+        useDropTarget?: boolean,
+      ) => void
+      OnFileDropOff?: () => void
       WindowHide?: () => void
       Quit?: () => void
     }
@@ -140,6 +148,8 @@ export const App = {
   pickFile: () => api().PickFile(),
   resolvePath: (p: string) => api().ResolvePath(p),
   takeDropPath: () => api().TakeDropPath(),
+  notifyDropReady: () => api().NotifyDropReady(),
+  dropReady: () => api().DropReady(),
   listCandidates: (appid: string) => api().ListCandidates(appid),
   addGame: (g: Partial<Game>) => api().AddGame(g as Game),
   updateGame: (g: Game) => api().UpdateGame(g),
@@ -152,4 +162,64 @@ export const App = {
   openGameFolder: (p: string) => api().OpenGameFolder(p),
   hideWindow: () => api().HideWindow(),
   quit: () => api().Quit(),
+}
+
+// ============================================================
+// 拖放注册
+//
+// Wails v2 的 DOM dragover/dragleave/drop 监听，是前端调用
+// window.runtime.OnFileDrop() 时才挂上的（见 runtime/desktop/draganddrop.js）。
+// 只在 Go 侧写 runtime.OnFileDrop 不会生效 —— 事件永远不会派发到 Go。
+// 实测：未调用时日志里一条 [drop] 记录都没有。
+//
+// 第二个参数传 false：不要求落点元素带 --wails-drop-target，
+// 整个窗口任意位置都能接收拖放，比限定一个虚线框好用。
+// ============================================================
+// 已注册过就不再重复注册，否则回调会被叠加、
+// 一次拖放触发多次解析（实测日志里出现过多条「前端已订阅拖放」）。
+let dropRegistered = false
+
+export function registerFileDrop(onPaths: (paths: string[]) => void): () => void {
+  const rt = window.runtime
+  if (!rt?.OnFileDrop) {
+    console.warn('[drop] 运行时未就绪，拖放不可用')
+    return () => {}
+  }
+  // 用「最新的回调」覆盖旧的：模块级变量，重复注册时只保留最后一次
+  dropCallback = onPaths
+
+  if (!dropRegistered) {
+    dropRegistered = true
+    rt.OnFileDrop((_x, _y, paths) => {
+      // 始终转发给当前最新的回调，避免组件重挂后回调失效
+      if (paths && paths.length > 0) dropCallback?.(paths)
+    }, false)
+
+    // 告知 Go 侧前端已挂上监听（只报一次）
+    try {
+      void App.notifyDropReady()
+    } catch {
+      /* 绑定未就绪时忽略 */
+    }
+  }
+
+  // 组件卸载时只解绑回调，不撤销 DOM 监听
+  // （其它页面可能仍在使用；撤销后再注册会重复挂监听）
+  return () => {
+    if (dropCallback === onPaths) dropCallback = null
+  }
+}
+
+let dropCallback: ((paths: string[]) => void) | null = null
+
+// onDropDetach 在程序退出前彻底解除监听（当前未使用，保留 API 完整性）。
+export function unregisterFileDrop(): void {
+  if (!dropRegistered) return
+  dropRegistered = false
+  dropCallback = null
+  try {
+    window.runtime?.OnFileDropOff?.()
+  } catch {
+    /* 忽略 */
+  }
 }

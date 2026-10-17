@@ -46,6 +46,21 @@ func (a *App) startup(ctx context.Context) {
 	log.Printf("[app] 启动完成，拖放监听已注册")
 }
 
+// NotifyDropReady 由前端在成功调用 runtime.OnFileDrop 后调用。
+//
+// 为什么要这个：Wails v2 的 DOM 拖放监听是前端调用 OnFileDrop 时才挂上的，
+// Go 侧那句 runtime.OnFileDrop 只是注册了事件回调。前端没调用 → 拖放永远不触发。
+// 这条日志能一眼区分「前端没注册」和「注册了但路径没传过来」。
+func (a *App) NotifyDropReady() {
+	dropReady.Store(true)
+	log.Printf("[app] 前端已订阅拖放（DropReady）")
+}
+
+// DropReady 查询前端是否已订阅拖放。
+func (a *App) DropReady() bool {
+	return dropReady.Load()
+}
+
 // TakeDropPath 取走最近一次拖入的路径（前端轮询取走）。
 // 返回空串表示没有待处理路径。
 func (a *App) TakeDropPath() string {
@@ -133,7 +148,10 @@ func (a *App) PickFile() ResolveResult {
 
 // ResolvePath 解析拖入的路径（.exe / .lnk / .url）。
 func (a *App) ResolvePath(path string) ResolveResult {
-	return ResolvePath(path)
+	r := ResolvePath(path)
+	log.Printf("[drop] 解析 %q -> kind=%s exe=%q suggested=%q err=%q",
+		path, r.Kind, r.Exe, r.Suggested, r.Error)
+	return r
 }
 
 // ListCandidates 返回 Steam 游戏的候选 exe 列表（含大小与图标）。
@@ -321,4 +339,9 @@ func newID() string {
 		return fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b[:])
+}
+
+// DumpDom 让页面把当前关键 DOM 状态写到日志（排查界面问题用）。
+func (a *App) DumpDom(info string) {
+	log.Printf("[dom] %s", info)
 }

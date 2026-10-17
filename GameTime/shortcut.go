@@ -33,7 +33,21 @@ type lnkCandidate struct {
 }
 
 // resolveLnk 解析 .lnk 的目标路径。
+//
+// 优先走 COM（系统实现，中文/相对路径/MSI 广告快捷方式都能正确处理），
+// 只有在 COM 不可用时才退回纯二进制解析（兜底，可能拿不到中文路径）。
 func resolveLnk(lnkPath string) (string, error) {
+	// ---- 首选：COM IShellLinkW ----
+	if p, err := resolveLnkCOM(lnkPath); err == nil && p != "" {
+		return expandEnv(p), nil
+	}
+
+	// ---- 兜底：纯二进制解析 ----
+	return resolveLnkRaw(lnkPath)
+}
+
+// resolveLnkRaw 纯二进制解析（不依赖 COM）。
+func resolveLnkRaw(lnkPath string) (string, error) {
 	data, err := os.ReadFile(lnkPath)
 	if err != nil {
 		return "", err
@@ -65,16 +79,38 @@ func resolveLnk(lnkPath string) (string, error) {
 		if p == "" {
 			continue
 		}
+		// 必须是绝对路径：.lnk 里常有 "\r11_sc_beta.exe" 这种相对碎片，
+		// os.Stat 会相对当前工作目录去解析，可能"碰巧存在"而误判为有效。
+		if !isAbsPath(p) {
+			continue
+		}
 		if st, err := os.Stat(p); err == nil && !st.IsDir() {
 			return p, nil
 		}
 	}
-	// 都不存在时退回最高分（可能是便携版/已卸载，仍让用户看到线索）
-	best := expandEnv(cands[0].Path)
-	if best == "" {
-		return "", fmt.Errorf("目标路径为空")
+	// 都不存在时退回「最高分的绝对路径」作线索
+	for _, c := range cands {
+		p := expandEnv(c.Path)
+		if p != "" && isAbsPath(p) {
+			return p, nil
+		}
 	}
-	return best, nil
+	return "", fmt.Errorf("快捷方式里的目标路径不是有效的绝对路径（可能已失效）")
+}
+
+// isAbsPath 判断是否为绝对路径（盘符或 UNC）。
+func isAbsPath(p string) bool {
+	if strings.HasPrefix(p, `\\`) { // UNC
+		return true
+	}
+	if len(p) >= 3 && p[1] == ':' && (p[2] == '\\' || p[2] == '/') {
+		return isASCIILetter(p[0])
+	}
+	return false
+}
+
+func isASCIILetter(b byte) bool {
+	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
 }
 
 // collectLnkPaths 扫描 .lnk 二进制，收集所有看起来像路径的字符串。
@@ -111,30 +147,47 @@ func collectLnkPaths(data []byte) []lnkCandidate {
 
 // joinPathFragments 尝试把被 NUL 分隔的路径片段拼成完整 exe 路径。
 //
-// 实测 Ubisoft Connect.lnk 的布局：
+// 实测两种布局：
 //
-//	[100] "/C:\"  [137] "Program Files (x86)"  [259] "Ubisoft"
-//	[345] "Ubisoft Game Launcher"  [473] "UbisoftConnect.exe"
+//	Ubisoft Connect.lnk（纯英文）：
+//	  "C:\" | "Program Files (x86)" | "Ubisoft" | "Ubisoft Game Launcher" | "UbisoftConnect.exe"
 //
-// 段间隔可以到 120+ 字节（中间夹着其它结构体），起点还可能带前导 "/"。
-// 所以规则是：找到以盘符结尾的根片段，向后按顺序累积，直到某段以 .exe 结尾。
+//	r11.lnk（含中文目录）：
+//	  "D:\" | <GBK 中文目录> | "REMEMB~1" | <GBK 中文> | "r11_sc_beta.exe"
+//
+// 关键：中文段是按系统代码页（GBK）存的，按 ASCII 扫会被当成不可打印字符截断，
+// 所以要按 GBK 解码，把中文段也当一个合法路径段。
 func joinPathFragments(data []byte) []string {
 	type seg struct {
 		text  string
 		start int
 		end   int
 	}
+
+	// 用 GBK 解码整段字节流（ASCII 与 GBK 兼容，纯英文不会受影响）
+	gbk := make([]byte, len(data))
+	copy(gbk, data)
+	if dec, err := decodeGBK(data); err == nil {
+		gbk = []byte(dec)
+	}
+	// 用与原字节流等长的表示来保证偏移一致：逐字节判断"是否路径字符"
 	var segs []seg
 	start := -1
 	for i := 0; i <= len(data); i++ {
-		printable := i < len(data) && data[i] >= 0x20 && data[i] < 0x7F
-		if printable {
+		ok := false
+		if i < len(data) {
+			c := data[i]
+			// 可打印 ASCII，或 GBK 双字节高位（紧跟低字节一起纳入）
+			ok = (c >= 0x20 && c < 0x7F) || c >= 0x81
+		}
+		if ok {
 			if start < 0 {
 				start = i
 			}
 		} else if start >= 0 {
 			if i-start >= 2 {
-				segs = append(segs, seg{text: string(data[start:i]), start: start, end: i})
+				txt := decodeSegment(data[start:i])
+				segs = append(segs, seg{text: txt, start: start, end: i})
 			}
 			start = -1
 		}
@@ -143,7 +196,7 @@ func joinPathFragments(data []byte) []string {
 	var out []string
 	for i := 0; i < len(segs); i++ {
 		t := strings.TrimLeft(segs[i].text, `/\`)
-		// 根片段：以盘符 + 反斜杠结尾，如 "C:\"
+		// 根片段：盘符 + 反斜杠，如 "D:\"
 		if !isDriveRoot(t) {
 			continue
 		}
@@ -151,8 +204,8 @@ func joinPathFragments(data []byte) []string {
 		cur := t
 		for j := i + 1; j < len(segs) && j <= i+10; j++ {
 			nx := segs[j].text
-			// 段间可以隔开，但不能跨太远（同一 LinkInfo 结构内通常 < 200 字节）
-			if segs[j].start-segs[j-1].end > 220 {
+			// 段间可以隔开，但不能跨太远（同一 LinkInfo 结构内通常 < 260 字节）
+			if segs[j].start-segs[j-1].end > 260 {
 				break
 			}
 			if !strings.HasSuffix(cur, `\`) {
@@ -170,6 +223,14 @@ func joinPathFragments(data []byte) []string {
 	return out
 }
 
+// decodeSegment 把一段原始字节按 GBK 解码（失败则退回原始 ASCII）。
+func decodeSegment(b []byte) string {
+	if dec, err := decodeGBK(b); err == nil && dec != "" {
+		return dec
+	}
+	return string(b)
+}
+
 // isDriveRoot 判断是否形如 "C:\" 或 "C:"。
 func isDriveRoot(s string) bool {
 	if len(s) == 2 {
@@ -185,28 +246,34 @@ func isAlpha(b byte) bool {
 	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
 }
 
-// utf16Strings 从字节流里扫出 UTF-16LE 字符串（连续可打印宽字符）。
+// utf16Strings 从字节流里扫出 UTF-16LE 字符串。
+//
+// 关键：不能只从偏移 0 按偶数步进。.lnk 里的 StringData 是变长结构，
+// UTF-16 字段的起始字节可能落在奇数位（实测 r11.lnk 的完整路径就起于 offset 471）。
+// 只扫偶数位会把它解成高低字节互换的乱码（"㩄䝜䵁…"）。
+// 所以必须两种奇偶对齐各扫一遍。
 func utf16Strings(data []byte) []string {
 	var out []string
-	var buf []uint16
-	flush := func() {
-		if len(buf) >= 4 {
-			s := string(utf16.Decode(buf))
-			if s != "" {
-				out = append(out, s)
+	for _, parity := range []int{0, 1} {
+		var buf []uint16
+		flush := func() {
+			if len(buf) >= 4 {
+				if s := string(utf16.Decode(buf)); s != "" {
+					out = append(out, s)
+				}
+			}
+			buf = buf[:0]
+		}
+		for i := parity; i+1 < len(data); i += 2 {
+			c := uint16(data[i]) | uint16(data[i+1])<<8
+			if isPrintableWide(c) {
+				buf = append(buf, c)
+			} else {
+				flush()
 			}
 		}
-		buf = buf[:0]
+		flush()
 	}
-	for i := 0; i+1 < len(data); i += 2 {
-		c := uint16(data[i]) | uint16(data[i+1])<<8
-		if isPrintableWide(c) {
-			buf = append(buf, c)
-		} else {
-			flush()
-		}
-	}
-	flush()
 	return out
 }
 

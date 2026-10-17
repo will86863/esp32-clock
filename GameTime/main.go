@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -39,6 +40,9 @@ var (
 
 	// startHiddenFlag 由 -minimized 命令行设置，startup 里据此隐藏窗口
 	startHiddenFlag bool
+
+	// dropReady 前端是否已调用 runtime.OnFileDrop 挂上拖放监听
+	dropReady atomic.Bool
 )
 
 func main() {
@@ -68,14 +72,24 @@ func main() {
 
 	// 拖放：Wails v2 的 OnFileDrop 能拿到真实绝对路径（浏览器拿不到）
 	// 这里把路径暂存，前端轮询 TakeDropPath 取走。
+	//
+	// 注意：拖 .url 时 Wails 会传 ["", "", "C:\\...\\x.url"]（含空串与前导空格），
+	// 所以必须过滤掉空项，否则前端按第一个取会拿到空串、弹窗不出现。
 	fileDropHandler = func(x, y int, paths []string) {
-		if len(paths) == 0 {
+		clean := make([]string, 0, len(paths))
+		for _, p := range paths {
+			if t := strings.TrimSpace(p); t != "" {
+				clean = append(clean, t)
+			}
+		}
+		if len(clean) == 0 {
+			log.Printf("[drop] 收到 %d 个路径但全为空: %v", len(paths), paths)
 			return
 		}
 		dropMu.Lock()
-		dropPending = append(dropPending, paths...)
+		dropPending = append(dropPending, clean...)
 		dropMu.Unlock()
-		log.Printf("[drop] 收到 %d 个路径: %v", len(paths), paths)
+		log.Printf("[drop] 收到 %d 个有效路径: %v", len(clean), clean)
 	}
 
 	err := wails.Run(&options.App{

@@ -321,82 +321,108 @@ function DayTrend({ items }: { items: { day: string; total: number }[] }) {
     return () => ro.disconnect()
   }, [])
 
-  const padL = 8
+  const padL = 44 // 左侧留出纵轴刻度
   const padR = 8
-  const padT = 14
-  const padB = 26
-  const h = 200
-  const innerW = Math.max(20, w - padL - padR)
+  const padT = 16
+  const padB = 28
+  const h = 210
+  const innerW = Math.max(60, w - padL - padR)
   const innerH = h - padT - padB
 
   const max = Math.max(...items.map((i) => i.total), 1)
-  const n = items.length
-  const stepX = n > 1 ? innerW / (n - 1) : 0
-
-  const pts = items.map((it, i) => {
-    const x = padL + i * stepX
-    const y = padT + innerH - (it.total / max) * innerH
-    return { x, y, ...it }
-  })
-
-  const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
-  const area =
-    pts.length > 0
-      ? `${line} L${pts[pts.length - 1].x.toFixed(1)},${padT + innerH} L${pts[0].x.toFixed(1)},${
-          padT + innerH
-        } Z`
-      : ''
+  const n = Math.max(items.length, 1)
+  // 柱子宽度：留 30% 间隙，最粗 28px
+  const slot = innerW / n
+  const barW = Math.max(3, Math.min(28, slot * 0.7))
 
   // 横轴标签：30 天时隔几个显示，避免重叠
   const labelEvery = n > 14 ? Math.ceil(n / 8) : n > 7 ? 2 : 1
   const hours = (v: number) => (v / 3600).toFixed(v >= 3600 ? 0 : 1)
 
+  // 纵轴刻度：0 / 一半 / 最大
+  const ticks = [
+    { v: 0, label: '0' },
+    { v: max / 2, label: hours(max / 2) + 'h' },
+    { v: max, label: hours(max) + 'h' },
+  ]
+
   return (
     <div ref={ref} style={{ width: '100%' }}>
-      <svg width={w} height={h} role="img" aria-label="近几天时长趋势">
-        {/* 网格线 */}
-        {[0, 0.5, 1].map((r) => (
-          <line
-            key={r}
-            x1={padL}
-            x2={w - padR}
-            y1={padT + innerH * r}
-            y2={padT + innerH * r}
-            stroke={tokens.colorNeutralStroke2}
-            strokeDasharray={r === 1 ? undefined : '3 3'}
-          />
-        ))}
-        {/* 面积 */}
-        {area ? <path d={area} fill={tokens.colorBrandBackground2} opacity={0.5} /> : null}
-        {/* 折线 */}
-        {line ? (
-          <path d={line} fill="none" stroke={tokens.colorBrandBackground} strokeWidth={2} />
-        ) : null}
-        {/* 数据点 + 提示 */}
-        {pts.map((p, i) => (
-          <g key={p.day}>
-            <circle cx={p.x} cy={p.y} r={3} fill={tokens.colorBrandBackground}>
-              <title>
-                {p.day} · {fmtHMS(p.total)}
-              </title>
-            </circle>
-            {i % labelEvery === 0 || i === n - 1 ? (
+      <svg width={w} height={h} role="img" aria-label="近期每日时长（竖柱状图）">
+        {/* 横向网格 + 纵轴刻度 */}
+        {ticks.map((t, i) => {
+          const y = padT + innerH - (t.v / max) * innerH
+          return (
+            <g key={i}>
+              <line
+                x1={padL}
+                x2={w - padR}
+                y1={y}
+                y2={y}
+                stroke={tokens.colorNeutralStroke2}
+                strokeDasharray={i === 0 ? undefined : '3 3'}
+              />
               <text
-                x={p.x}
-                y={h - 8}
-                textAnchor="middle"
-                fontSize={11}
+                x={padL - 6}
+                y={y + 3}
+                textAnchor="end"
+                fontSize={10}
                 fill={tokens.colorNeutralForeground3}
               >
-                {fmtDay(p.day)}
+                {t.label}
               </text>
-            ) : null}
-          </g>
-        ))}
-        {/* 纵轴最大刻度 */}
-        <text x={padL} y={padT - 3} fontSize={11} fill={tokens.colorNeutralForeground3}>
-          {hours(max)}h
-        </text>
+            </g>
+          )
+        })}
+
+        {/* 柱子 */}
+        {items.map((it, i) => {
+          const bh = it.total > 0 ? Math.max(2, (it.total / max) * innerH) : 0
+          const x = padL + i * slot + (slot - barW) / 2
+          const y = padT + innerH - bh
+          return (
+            <g key={it.day}>
+              {bh > 0 ? (
+                <rect
+                  x={x}
+                  y={y}
+                  width={barW}
+                  height={bh}
+                  rx={Math.min(3, barW / 2)}
+                  fill={tokens.colorBrandBackground}
+                >
+                  <title>
+                    {it.day} · {fmtHMS(it.total)}
+                  </title>
+                </rect>
+              ) : (
+                // 0 值日画一条细底纹，避免看起来"缺了一天"
+                <rect
+                  x={x}
+                  y={padT + innerH - 1}
+                  width={barW}
+                  height={1}
+                  fill={tokens.colorNeutralStroke1}
+                >
+                  <title>
+                    {it.day} · {fmtHMS(it.total)}
+                  </title>
+                </rect>
+              )}
+              {i % labelEvery === 0 || i === n - 1 ? (
+                <text
+                  x={x + barW / 2}
+                  y={h - 9}
+                  textAnchor="middle"
+                  fontSize={10}
+                  fill={tokens.colorNeutralForeground3}
+                >
+                  {fmtDay(it.day)}
+                </text>
+              ) : null}
+            </g>
+          )
+        })}
       </svg>
     </div>
   )

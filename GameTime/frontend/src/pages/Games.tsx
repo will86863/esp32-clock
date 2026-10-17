@@ -33,7 +33,15 @@ import {
   Dismiss24Regular,
   Open24Regular,
 } from '@fluentui/react-icons'
-import { App as api, Config, Game, LiveStatus, ResolveResult, ExeCandidate } from '../api'
+import {
+  App as api,
+  Config,
+  Game,
+  LiveStatus,
+  ResolveResult,
+  ExeCandidate,
+  registerFileDrop,
+} from '../api'
 import { checkDisplay, DISPLAY_MAX } from '../util'
 
 const useStyles = makeStyles({
@@ -176,27 +184,46 @@ export default function GamesPage({
       source: r.steam ? 'steam' : r.kind,
       error: r.error || '',
     })
+    // 延迟确认弹窗是否真的出现在 DOM 里
+    window.setTimeout(() => {
+      try {
+        const n = document.querySelectorAll('[role="dialog"]').length
+        void window.go?.main?.App?.LogFromFrontend?.('dialog', '弹窗数=' + n)
+      } catch {
+        /* 忽略 */
+      }
+    }, 500)
   }
 
   // ---------- 拖放 ----------
-  // Wails v2 的 file-drop 只能从 Go 侧拿到真实绝对路径（浏览器拿不到）。
-  // Go 侧收到后暂存，这里轮询 TakeDropPath 取走。
+  // 两步缺一不可：
+  //   1) registerFileDrop → 前端调用 window.runtime.OnFileDrop，
+  //      Wails 才会挂上 DOM 的 dragover/drop 监听（否则 Go 侧永远收不到）
+  //   2) 轮询 TakeDropPath → 从 Go 侧取走真实绝对路径（浏览器拿不到绝对路径）
   React.useEffect(() => {
-    let alive = true
-
-    const pollDrop = async () => {
-      if (!alive) return
-      try {
-        const p = await api.takeDropPath()
-        if (p) await resolveAndOpen(p)
-      } catch {
-        /* 绑定未就绪时忽略 */
-      }
-    }
+    const off = registerFileDrop((paths) => {
+      // 注意：拖 .url 时 WebView2 会给出 ["", "", "C:\\...\\x.url"] 这种数组
+      // （前面带空串，字符串本身还可能带前导空格），直接取 paths[0] 会拿到空串
+      // 导致弹窗根本不出现。所以取「第一个非空且未 trim 前非空」的项。
+      const p = (paths || [])
+        .map((s) => (s ?? '').trim())
+        .find((s) => s.length > 0)
+      if (p) void resolveAndOpen(p)
+      else
+        try {
+          void window.go?.main?.App?.LogFromFrontend?.(
+            'drop',
+            '无有效路径: ' + JSON.stringify(paths),
+          )
+        } catch {
+          /* 忽略 */
+        }
+    })
 
     const onDragOver = (e: DragEvent) => {
+      if (!e.dataTransfer?.types?.includes('Files')) return
       e.preventDefault()
-      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+      e.dataTransfer.dropEffect = 'copy'
       setDragOver(true)
     }
     const onDragLeave = (e: DragEvent) => {
@@ -204,22 +231,18 @@ export default function GamesPage({
     }
     const onDrop = (e: DragEvent) => {
       // 必须阻止默认行为，否则 WebView 会尝试「打开」被拖入的文件
-      e.preventDefault()
+      if (e.dataTransfer?.types?.includes('Files')) e.preventDefault()
       setDragOver(false)
-      // 路径由 Go 侧异步送达，稍后轮询取走
-      window.setTimeout(pollDrop, 120)
     }
 
-    window.addEventListener('dragover', onDragOver)
-    window.addEventListener('dragleave', onDragLeave)
-    window.addEventListener('drop', onDrop, true) // 捕获阶段抢在默认行为之前
+    window.addEventListener('dragover', onDragOver, true)
+    window.addEventListener('dragleave', onDragLeave, true)
+    window.addEventListener('drop', onDrop, true)
 
-    const timer = window.setInterval(pollDrop, 700)
     return () => {
-      alive = false
-      window.clearInterval(timer)
-      window.removeEventListener('dragover', onDragOver)
-      window.removeEventListener('dragleave', onDragLeave)
+      off()
+      window.removeEventListener('dragover', onDragOver, true)
+      window.removeEventListener('dragleave', onDragLeave, true)
       window.removeEventListener('drop', onDrop, true)
     }
   }, [resolveAndOpen])
