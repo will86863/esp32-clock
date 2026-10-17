@@ -85,11 +85,23 @@ func LoadConfig() (Config, error) {
 		}
 		return cfg, err
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := json.Unmarshal(stripBOM(data), &cfg); err != nil {
 		return defaultConfig(), fmt.Errorf("config.json 解析失败: %w", err)
 	}
 	normalizeConfig(&cfg)
 	return cfg, nil
+}
+
+// stripBOM 去掉 UTF-8 BOM。
+//
+// 为什么需要：用户可能用手写脚本/PowerShell 的 Set-Content -Encoding utf8
+// 编辑配置文件，那些工具会写入 BOM，而 Go 的 encoding/json 不接受 BOM，
+// 会导致整个配置读不出来（程序表现为"列表空了"）。
+func stripBOM(b []byte) []byte {
+	if len(b) >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF {
+		return b[3:]
+	}
+	return b
 }
 
 // SaveConfig 原子写入配置（先写 .tmp 再改名）。

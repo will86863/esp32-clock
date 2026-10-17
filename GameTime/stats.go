@@ -73,8 +73,13 @@ func loadSessions() error {
 	out := make([]SessionRecord, 0, 512)
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	first := true
 	for sc.Scan() {
 		line := sc.Bytes()
+		if first {
+			line = stripBOM(line)
+			first = false
+		}
 		if len(line) == 0 {
 			continue
 		}
