@@ -1,5 +1,5 @@
 # ============================================================
-# SmallDesktopDisplay / V1.4
+# SmallDesktopDisplay V1.4 / GameTime
 # ============================================================
 
 # ---------- IDE / 编辑器配置 ----------
@@ -12,8 +12,9 @@
 # ---------- AI 助手本地记忆 ----------
 .workbuddy/
 
-# ---------- 历史备份文件 ----------
-# 固件各版本快照（.bak_v14 ... .bak_v168）保留在磁盘，不入库
+# ---------- 备份归档（单独存放，不入库） ----------
+# 固件历史快照 .bak_v14 ... .bak_v168 统一放在 _archive/backups/
+_archive/
 *.bak
 *.bak_v*
 *.orig
@@ -21,20 +22,29 @@
 
 # ---------- 编译产物 / 临时文件 ----------
 build/
+bin/
 *.o
 *.obj
 *.elf
 *.map
-*.bin.tmp
 *.hex
-# 注意：SmallDesktopDisplay_V1.4.bin 是发布固件，保留（下方取反）
+*.bin.tmp
+# 注意：SmallDesktopDisplay_V1.4.bin 是发布固件，需保留（下方取反）
 !SmallDesktopDisplay_V1.4.bin
 
-# Go 上位机编译产物（game-uptime.bak_preWails）
+# Go 上位机编译产物
 *.exe
 *.exe~
+*.syso
+*-res.syso
 
-# Python
+# ---------- 前端 ----------
+node_modules/
+dist/
+frontend/wailsjs/
+.pnpm-store/
+
+# ---------- Python ----------
 __pycache__/
 *.pyc
 *.pyo
@@ -49,3 +59,4 @@ $RECYCLE.BIN/
 # ---------- 本地覆盖配置 ----------
 config.local.json
 *.local
+*.log

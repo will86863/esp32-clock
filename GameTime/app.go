@@ -308,15 +308,23 @@ func (a *App) AutostartState() bool {
 }
 
 // OpenDataDir 打开配置与统计数据所在目录。
-func (a *App) OpenDataDir() {
+func (a *App) OpenDataDir() error {
 	dir := appDataDir()
-	runtime.BrowserOpenURL(a.ctx, "file:///"+filepath.ToSlash(dir))
+	err := openPath(dir)
+	logOpenResult("打开数据目录", dir, err)
+	return err
 }
 
-// OpenGameFolder 打开程序所在目录。
-func (a *App) OpenGameFolder(path string) {
+// OpenGameFolder 打开程序所在目录（并在资源管理器中选中该 exe）。
+func (a *App) OpenGameFolder(path string) error {
+	if path == "" {
+		return fmt.Errorf("程序路径为空")
+	}
+	// 直接打开所在目录（openPath 对文件会自动选中它）
 	dir := filepath.Dir(path)
-	runtime.BrowserOpenURL(a.ctx, "file:///"+filepath.ToSlash(dir))
+	err := openPath(dir)
+	logOpenResult("打开程序目录", dir, err)
+	return err
 }
 
 // HideWindow 隐藏主窗口到托盘。
