@@ -150,13 +150,43 @@ export default function App({
 
   const { openNav, onNavToggle } = { openNav: true, onNavToggle: () => {} }
 
+  // 切页：先清理上一页可能残留的弹窗遮罩，再切。
+  //
+  // 背景：Fluent 的 Dialog 会在 document.body 下渲染遮罩层（.fui-DialogSurface__backdrop
+  // 或 role=dialog 的包裹节点）。如果切页时上一页正开着弹窗，组件被卸载后遮罩会
+  // 留在 DOM 里 —— 表现就是切到的新页面一片空白、完全点不动。
+  //
+  // 之前试过「四个页面常驻挂载」来避免卸载，但实测那会让 WebView2 整体不绘制（白屏），
+  // 所以仍然用条件渲染，改在切页这一处主动清理残留。
+  const switchPage = React.useCallback((next: PageKey) => {
+    // 先切页（卸载旧页），再在下一帧清残留 —— 顺序反了会清掉新页自己的弹窗
+    setPage(next)
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        document
+          .querySelectorAll('.fui-DialogSurface, .fui-DialogSurface__backdrop')
+          .forEach((el) => {
+            // 只删 body 直属的浮层，页面内的正常内容不动
+            if (el.parentElement === document.body) el.remove()
+          })
+        // Dialog 打开时会锁滚动/禁用指针事件，卸载后可能没复原
+        document.body.style.removeProperty('overflow')
+        document.body.style.removeProperty('pointer-events')
+        document.body.style.removeProperty('padding-right')
+        document.documentElement.style.removeProperty('overflow')
+      })
+    })
+  }, [])
+
   return (
     <div className={styles.root}>
       <NavDrawer
         open={true}
         type="inline"
         selectedValue={page}
-        onNavItemSelect={(_, data) => setPage((data.value as PageKey) ?? 'overview')}
+        onNavItemSelect={(_, data) =>
+          switchPage((data.value as PageKey) ?? 'overview')
+        }
         className={styles.nav}
       >
         <NavDrawerHeader>

@@ -30,7 +30,6 @@ import {
   Delete24Regular,
   Edit24Regular,
   Checkmark24Regular,
-  Dismiss24Regular,
   Open24Regular,
 } from '@fluentui/react-icons'
 import {
@@ -69,12 +68,16 @@ const useStyles = makeStyles({
     border: `2px dashed ${tokens.colorBrandStroke1}`,
     backgroundColor: tokens.colorBrandBackground2,
   },
-  nameCell: { display: 'flex', alignItems: 'center', gap: '10px' },
+  // 固定布局：避免长路径把列撑开、让输入框互相压住
+  table: { tableLayout: 'fixed' },
+  nameCell: { display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 },
+  nameText: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   path: {
     fontSize: '12px',
     color: tokens.colorNeutralForeground3,
-    wordBreak: 'break-all',
-    maxWidth: '520px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   candRow: {
     display: 'flex',
@@ -138,9 +141,13 @@ export default function GamesPage({
   const s = useStyles()
   const [add, setAdd] = React.useState<AddState>(emptyAdd)
   const [dragOver, setDragOver] = React.useState(false)
-  const [editing, setEditing] = React.useState<string | null>(null)
-  const [editVal, setEditVal] = React.useState('')
   const [busy, setBusy] = React.useState('')
+
+  // 改名弹窗（取代原来的行内编辑）
+  // 为什么改弹窗：行内用 Field 会在下方渲染校验提示文字，把行高撑大、
+  // 和下一行内容重叠。弹窗有独立空间，输入框不会再互相压住。
+  const [rename, setRename] = React.useState<Game | null>(null)
+  const [renameVal, setRenameVal] = React.useState('')
 
   const games = config?.games ?? []
 
@@ -277,23 +284,44 @@ export default function GamesPage({
   }
 
   // ---------- 改名 ----------
-  const startEdit = (g: Game) => {
-    setEditing(g.id)
-    setEditVal(g.display)
+  const openRename = (g: Game) => {
+    setRenameVal(g.display)
+    setRename(g)
+    // 确认弹窗真的渲染出来（排查界面问题用）
+    window.setTimeout(() => {
+      try {
+        const dlg = document.querySelectorAll('[role="dialog"]')
+        const inputs = document.querySelectorAll('[role="dialog"] input')
+        const first = inputs[0] as HTMLElement | undefined
+        const rect = first?.getBoundingClientRect()
+        void window.go?.main?.App?.LogFromFrontend?.(
+          'rename',
+          '改名弹窗已打开 dialogs=' +
+            dlg.length +
+            ' inputs=' +
+            inputs.length +
+            ' box=' +
+            (rect ? Math.round(rect.width) + 'x' + Math.round(rect.height) : 'none'),
+        )
+      } catch {
+        /* 忽略 */
+      }
+    }, 400)
   }
 
-  const saveEdit = async (g: Game) => {
-    const err = checkDisplay(editVal)
+  const submitRename = async () => {
+    if (!rename) return
+    const err = checkDisplay(renameVal)
     if (err) {
       notify('显示名不合法', err, 'error')
       return
     }
-    setBusy(g.id)
+    setBusy(rename.id)
     try {
-      await api.updateGame({ ...g, display: editVal.trim() })
-      setEditing(null)
+      await api.updateGame({ ...rename, display: renameVal.trim() })
+      setRename(null)
       await onChanged()
-      notify('已保存', editVal.trim(), 'success')
+      notify('已保存', renameVal.trim(), 'success')
     } catch (e: any) {
       notify('保存失败', String(e?.message ?? e), 'error')
     } finally {
@@ -321,6 +349,7 @@ export default function GamesPage({
   }, [live, games])
 
   const cands: ExeCandidate[] = add.result?.candidates ?? []
+  const renameErr = rename ? checkDisplay(renameVal) : ''
 
   return (
     <div className={s.wrap}>
@@ -360,7 +389,7 @@ export default function GamesPage({
           </div>
         </div>
       ) : (
-        <Table size="small">
+        <Table size="small" className={s.table}>
           <TableHeader>
             <TableRow>
               <TableHeaderCell style={{ width: '26%' }}>显示名（OLED）</TableHeaderCell>
@@ -375,62 +404,22 @@ export default function GamesPage({
                 <TableCell>
                   <TableCellLayout>
                     <div className={s.nameCell}>
-                      {editing === g.id ? (
-                        <>
-                          <Field
-                            validationState={checkDisplay(editVal) ? 'error' : 'none'}
-                            validationMessage={checkDisplay(editVal) || undefined}
-                            style={{ width: 200 }}
-                          >
-                            <Input
-                              value={editVal}
-                              autoFocus
-                              maxLength={DISPLAY_MAX + 8}
-                              contentAfter={
-                                <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
-                                  {editVal.length}/{DISPLAY_MAX}
-                                </Text>
-                              }
-                              onChange={(_, d) => setEditVal(d.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') saveEdit(g)
-                                if (e.key === 'Escape') setEditing(null)
-                              }}
-                            />
-                          </Field>
-                          <Button
-                            size="small"
-                            appearance="subtle"
-                            icon={<Checkmark24Regular />}
-                            onClick={() => saveEdit(g)}
-                          />
-                          <Button
-                            size="small"
-                            appearance="subtle"
-                            icon={<Dismiss24Regular />}
-                            onClick={() => setEditing(null)}
-                          />
-                        </>
-                      ) : (
-                        <>
-                          <Text weight="semibold" size={400}>
-                            {g.display}
-                          </Text>
-                          {runningId === g.id ? (
-                            <Badge appearance="filled" color="success" size="small">
-                              运行中
-                            </Badge>
-                          ) : null}
-                          <Tooltip content="修改显示名" relationship="label">
-                            <Button
-                              size="small"
-                              appearance="subtle"
-                              icon={<Edit24Regular />}
-                              onClick={() => startEdit(g)}
-                            />
-                          </Tooltip>
-                        </>
-                      )}
+                      <Text weight="semibold" size={400} className={s.nameText}>
+                        {g.display}
+                      </Text>
+                      {runningId === g.id ? (
+                        <Badge appearance="filled" color="success" size="small">
+                          运行中
+                        </Badge>
+                      ) : null}
+                      <Tooltip content="修改显示名" relationship="label">
+                        <Button
+                          size="small"
+                          appearance="subtle"
+                          icon={<Edit24Regular />}
+                          onClick={() => openRename(g)}
+                        />
+                      </Tooltip>
                     </div>
                   </TableCellLayout>
                 </TableCell>
@@ -602,6 +591,61 @@ export default function GamesPage({
                 onClick={submitAdd}
               >
                 {busy === 'add' ? '添加中…' : '添加'}
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
+      {/* ===================== 改名弹窗 ===================== */}
+      <Dialog
+        open={!!rename}
+        onOpenChange={(_, d) => {
+          if (!d.open) setRename(null)
+        }}
+      >
+        <DialogSurface style={{ maxWidth: 460 }}>
+          <DialogBody>
+            <DialogTitle>修改显示名</DialogTitle>
+            <DialogContent>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                  OLED 一行只有 16 个字符宽，且字库为 ASCII，所以只能是纯英文且不超过 16 字符。
+                </Text>
+                <Field
+                  label="显示名"
+                  validationState={renameErr ? 'error' : 'none'}
+                  validationMessage={renameErr || undefined}
+                >
+                  <Input
+                    value={renameVal}
+                    autoFocus
+                    maxLength={DISPLAY_MAX + 8}
+                    onChange={(_, d) => setRenameVal(d.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !renameErr) submitRename()
+                      if (e.key === 'Escape') setRename(null)
+                    }}
+                    contentAfter={
+                      <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
+                        {renameVal.length}/{DISPLAY_MAX}
+                      </Text>
+                    }
+                  />
+                </Field>
+                {rename ? <div className={s.path}>{rename.exe}</div> : null}
+              </div>
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="secondary" onClick={() => setRename(null)}>
+                取消
+              </Button>
+              <Button
+                appearance="primary"
+                disabled={!!renameErr || busy === rename?.id}
+                onClick={submitRename}
+              >
+                保存
               </Button>
             </DialogActions>
           </DialogBody>

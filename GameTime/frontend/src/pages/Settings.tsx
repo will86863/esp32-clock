@@ -9,7 +9,6 @@ import {
   Field,
   Switch,
   Divider,
-  SpinButton,
 } from '@fluentui/react-components'
 import {
   Save24Regular,
@@ -44,9 +43,16 @@ export default function SettingsPage({
   const [autostart, setAutostart] = React.useState(false)
   const [startHidden, setStartHidden] = React.useState(true)
   const [saving, setSaving] = React.useState(false)
+  // dirty：用户改过但还没保存。为 true 时不允许 config 回写覆盖输入框，
+  // 否则任何一次配置刷新都会让用户正在输入的值被重置（"输入完就恢复"）。
+  const dirtyRef = React.useRef(false)
+  const markDirty = () => {
+    dirtyRef.current = true
+  }
 
   React.useEffect(() => {
     if (!config) return
+    if (dirtyRef.current) return // 有未保存修改时不覆盖
     setIp(config.esp32_ip)
     setPort(config.esp32_port)
     setIntervalSec(config.interval_sec)
@@ -58,7 +64,9 @@ export default function SettingsPage({
   React.useEffect(() => {
     api
       .autostartState()
-      .then((v) => setAutostart(v))
+      .then((v) => {
+        if (!dirtyRef.current) setAutostart(v)
+      })
       .catch(() => {})
   }, [])
 
@@ -76,6 +84,8 @@ export default function SettingsPage({
       })
       const real = await api.setAutostart(autostart)
       setAutostart(real)
+      // 保存成功后解除 dirty，允许后续 config 刷新回写
+      dirtyRef.current = false
       await onChanged()
       notify('已保存', '设置立即生效', 'success')
     } catch (e: any) {
@@ -108,26 +118,40 @@ export default function SettingsPage({
         </Text>
         <div className={s.row}>
           <Field label="IP 地址" className={s.field}>
-            <Input value={ip} onChange={(_, d) => setIp(d.value)} placeholder="192.168.5.86" />
-          </Field>
-          <Field label="端口" className={s.field}>
-            <SpinButton
-              value={port}
-              min={1}
-              max={65535}
+            <Input
+              value={ip}
               onChange={(_, d) => {
-                const v = Number(d.value)
+                markDirty()
+                setIp(d.value)
+              }}
+              placeholder="192.168.5.86"
+            />
+          </Field>
+          {/*
+            端口/间隔用 Input type=number 而不是 SpinButton：
+            SpinButton 的受控 value 在手动输入时不会同步到 state，
+            一失焦就被重置回旧值（表现为"输入完就恢复"）。
+            Input 每次按键都触发 onChange，state 能实时跟上。
+          */}
+          <Field label="端口" className={s.field}>
+            <Input
+              type="number"
+              value={String(port)}
+              onChange={(_, d) => {
+                markDirty()
+                const v = parseInt(d.value, 10)
+                // 允许暂时输入空（如清空重输），此时保留原值避免组件报错
                 if (Number.isFinite(v)) setPort(v)
               }}
             />
           </Field>
           <Field label="发送间隔（秒）" className={s.field}>
-            <SpinButton
-              value={interval}
-              min={1}
-              max={60}
+            <Input
+              type="number"
+              value={String(interval)}
               onChange={(_, d) => {
-                const v = Number(d.value)
+                markDirty()
+                const v = parseInt(d.value, 10)
                 if (Number.isFinite(v)) setIntervalSec(v)
               }}
             />
@@ -149,7 +173,7 @@ export default function SettingsPage({
               </Text>
             </div>
           </div>
-          <Switch checked={autostart} onChange={(_, d) => setAutostart(d.checked)} />
+          <Switch checked={autostart} onChange={(_, d) => { markDirty(); setAutostart(d.checked) }} />
         </div>
         <Divider />
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -161,7 +185,7 @@ export default function SettingsPage({
               </Text>
             </div>
           </div>
-          <Switch checked={startHidden} onChange={(_, d) => setStartHidden(d.checked)} />
+          <Switch checked={startHidden} onChange={(_, d) => { markDirty(); setStartHidden(d.checked) }} />
         </div>
       </Card>
 
