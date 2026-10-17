@@ -51,3 +51,26 @@ body {
   0%, 100% { opacity: 0.85; }
   50% { opacity: 1; }
 }
+
+/* ============================================================
+   Fluent Dialog 的 Portal 容器去底色
+   ------------------------------------------------------------
+   问题：Fluent v9 的 Dialog 会渲染到一个挂在 body 下的
+   .fui-FluentProvider Portal 容器里。该容器是
+   position:absolute + z-index:1000000 + 整屏大小，并且自带
+   不透明背景（colorNeutralBackground1 = 白 / 浅灰）。
+
+   结果：一打开弹窗，整屏就被这层不透明容器盖住 ——
+   表现为「弹窗时其他页面白屏，关掉弹窗就恢复」。
+
+   修法：把 body 直属的 Portal 容器背景设为透明。
+   只作用于 body 的一级子元素，不会影响页面自身的 Provider。
+   ============================================================ */
+body > .fui-FluentProvider {
+  background-color: transparent !important;
+}
+
+/* 同时确保 DialogSurface 自己仍然是实底（弹窗本体要看得清） */
+.fui-DialogSurface {
+  background-color: var(--colorNeutralBackground1);
+}
