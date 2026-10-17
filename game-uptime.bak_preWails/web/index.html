@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>游戏时长监控 · 管理</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --line:#e3e6ea; --txt:#1f2329; --muted:#8a919c; --accent:#185fa5; --danger:#a32d2d; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font-family:system-ui,"Segoe UI","Microsoft YaHei",sans-serif; font-size:14px; line-height:1.6; }
+  .wrap { max-width:720px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:18px; font-weight:600; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .card h2 { font-size:14px; font-weight:600; margin:0 0 12px; }
+  label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px; }
+  input[type=text], input[type=number] { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:6px; font-size:14px; margin-bottom:12px; }
+  .row { display:flex; gap:12px; }
+  .row > div { flex:1; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); font-size:13px; }
+  th { color:var(--muted); font-weight:500; }
+  td input { margin:0; }
+  button { cursor:pointer; border:none; border-radius:6px; padding:8px 16px; font-size:14px; }
+  .btn-primary { background:var(--accent); color:#fff; }
+  .btn-ghost { background:#eef1f5; color:var(--txt); }
+  .btn-danger { background:#fcebeb; color:var(--danger); }
+  .actions { display:flex; gap:10px; margin-top:12px; flex-wrap:wrap; }
+  .status { display:flex; align-items:center; gap:10px; }
+  .dot { width:10px; height:10px; border-radius:50%; background:#c0c6ce; }
+  .dot.on { background:#3fae6a; }
+  .big { font-family:ui-monospace,Consolas,monospace; font-size:28px; font-weight:600; }
+  .hint { color:var(--muted); font-size:12px; margin-top:6px; }
+  .del { color:var(--danger); background:none; padding:4px 8px; font-size:13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>游戏时长监控</h1>
+  <div class="sub">后台程序管理页 · 修改后点「保存」即可生效，无需重启</div>
+
+  <div class="card">
+    <h2>当前状态</h2>
+    <div class="status">
+      <span class="dot" id="dot"></span>
+      <div>
+        <div class="big" id="time">00:00:00</div>
+        <div class="hint" id="gname">未运行</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>ESP32 目标</h2>
+    <div class="row">
+      <div><label>IP 地址</label><input type="text" id="esp32_ip"></div>
+      <div><label>端口</label><input type="number" id="esp32_port"></div>
+      <div><label>发送间隔(秒)</label><input type="number" id="interval_sec"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>监控进程</h2>
+    <table>
+      <thead><tr><th style="width:45%">进程名</th><th style="width:40%">显示名(留空=进程名)</th><th></th></tr></thead>
+      <tbody id="games"></tbody>
+    </table>
+    <div class="actions">
+      <button class="btn-ghost" onclick="addRow()">＋ 添加进程</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>设置</h2>
+    <label><input type="checkbox" id="autostart"> 开机自动启动</label>
+    <div class="hint">勾选后登录 Windows 即自动后台运行本程序。</div>
+  </div>
+
+  <div class="actions">
+    <button class="btn-primary" onclick="save()">保存配置</button>
+    <button class="btn-ghost" onclick="load()">重新读取</button>
+    <button class="btn-danger" onclick="quit()">退出程序</button>
+  </div>
+  <div class="hint" id="msg"></div>
+</div>
+
+<script>
+let cfg = null;
+
+function fmt(sec) {
+  sec = Math.max(0, sec|0);
+  const h = String(sec/3600|0).padStart(2,'0');
+  const m = String((sec%3600)/60|0).padStart(2,'0');
+  const s = String(sec%60).padStart(2,'0');
+  return `${h}:${m}:${s}`;
+}
+
+async function load() {
+  const r = await fetch('/api/config');
+  cfg = await r.json();
+  document.getElementById('esp32_ip').value = cfg.esp32_ip || '';
+  document.getElementById('esp32_port').value = cfg.esp32_port || 5005;
+  document.getElementById('interval_sec').value = cfg.interval_sec || 1;
+  document.getElementById('autostart').checked = !!cfg.autostart;
+  renderRows();
+}
+
+function renderRows() {
+  const tb = document.getElementById('games');
+  tb.innerHTML = '';
+  for (const g of cfg.games || []) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><input type="text" class="p" value="${esc(g.process)}"></td>
+      <td><input type="text" class="d" value="${esc(g.display)}"></td>
+      <td><button class="del" onclick="delRow(this)">删除</button></td>`;
+    tb.appendChild(tr);
+  }
+}
+
+function esc(s) { return (s||'').replace(/"/g,'&quot;'); }
+
+function addRow() {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td><input type="text" class="p" placeholder="game.exe"></td>
+    <td><input type="text" class="d" placeholder="可留空"></td>
+    <td><button class="del" onclick="delRow(this)">删除</button></td>`;
+  document.getElementById('games').appendChild(tr);
+}
+
+function delRow(btn) { btn.closest('tr').remove(); }
+
+async function save() {
+  cfg.esp32_ip = document.getElementById('esp32_ip').value.trim();
+  cfg.esp32_port = parseInt(document.getElementById('esp32_port').value) || 5005;
+  cfg.interval_sec = parseInt(document.getElementById('interval_sec').value) || 1;
+  cfg.autostart = document.getElementById('autostart').checked;
+  cfg.games = [...document.querySelectorAll('#games tr')].map(tr => ({
+    process: tr.querySelector('.p').value.trim(),
+    display: tr.querySelector('.d').value.trim(),
+  })).filter(g => g.process);
+  const r = await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cfg)});
+  if (r.ok) msg('已保存并生效');
+  else msg('保存失败');
+  await load();
+}
+
+async function quit() {
+  await fetch('/api/quit', {method:'POST'});
+  msg('程序已退出，可关闭本页');
+}
+
+function msg(t) { const m=document.getElementById('msg'); m.textContent=t; setTimeout(()=>m.textContent='',3000); }
+
+async function poll() {
+  try {
+    const r = await fetch('/api/status');
+    const s = await r.json();
+    document.getElementById('dot').className = 'dot' + (s.running ? ' on' : '');
+    document.getElementById('time').textContent = fmt(s.up);
+    document.getElementById('gname').textContent = s.running ? s.name : '未运行';
+  } catch(e) {}
+}
+
+load();
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>

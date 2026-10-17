@@ -1,0 +1,13 @@
+{
+  "esp32_ip": "192.168.5.86",
+  "esp32_port": 5005,
+  "interval_sec": 1,
+  "web_port": 8899,
+  "autostart": true,
+  "games": [
+    {
+      "process": "SiglusEngine_SteamEN.exe",
+      "display": "Rewrite+"
+    }
+  ]
+}

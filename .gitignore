@@ -1,0 +1,51 @@
+# ============================================================
+# SmallDesktopDisplay / V1.4
+# ============================================================
+
+# ---------- IDE / 编辑器配置 ----------
+.idea/
+*.iml
+.vscode/
+*.swp
+*~
+
+# ---------- AI 助手本地记忆 ----------
+.workbuddy/
+
+# ---------- 历史备份文件 ----------
+# 固件各版本快照（.bak_v14 ... .bak_v168）保留在磁盘，不入库
+*.bak
+*.bak_v*
+*.orig
+*.rej
+
+# ---------- 编译产物 / 临时文件 ----------
+build/
+*.o
+*.obj
+*.elf
+*.map
+*.bin.tmp
+*.hex
+# 注意：SmallDesktopDisplay_V1.4.bin 是发布固件，保留（下方取反）
+!SmallDesktopDisplay_V1.4.bin
+
+# Go 上位机编译产物（game-uptime.bak_preWails）
+*.exe
+*.exe~
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# ---------- 系统文件 ----------
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+$RECYCLE.BIN/
+
+# ---------- 本地覆盖配置 ----------
+config.local.json
+*.local
