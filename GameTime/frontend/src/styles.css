@@ -1,0 +1,53 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, 'Microsoft YaHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* 拖动区域：整个应用不可选中文本，避免拖拽时误选 */
+.no-select {
+  user-select: none;
+}
+
+/* Wails 拖放目标：CSSDropProperty 默认 --wails-drop-target: drop */
+[data-drop-active='true'] {
+  --wails-drop-target: drop;
+}
+
+/* 滚动条走 Fluent 风格 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.35);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.55);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 拖放遮罩动画 */
+@keyframes gt-pulse {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
+}

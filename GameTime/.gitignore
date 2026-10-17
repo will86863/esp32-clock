@@ -1,0 +1,17 @@
+# 构建产物
+build/bin/
+build/windows/
+*-res.syso
+rsrc*.syso
+
+# 前端依赖与产物
+frontend/node_modules/
+frontend/dist/
+
+# Wails 生成的绑定（可随时重建）
+frontend/wailsjs/
+
+# 临时文件
+*.tmp
+*.log
+_probe/

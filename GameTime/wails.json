@@ -1,0 +1,20 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "GameTime",
+  "outputfilename": "GameTime",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "will",
+    "email": "will86863@gmail.com"
+  },
+  "info": {
+    "companyName": "GameTime",
+    "productName": "GameTime",
+    "productVersion": "1.0.0",
+    "copyright": "",
+    "comments": "ESP32 游戏时长上位机"
+  }
+}
