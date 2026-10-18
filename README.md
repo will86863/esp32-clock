@@ -53,10 +53,8 @@ V1.4/
 ├─ game-uptime.bak_preWails/  旧版上位机（Go，无界面，仅作参考）
 ├─ tools/                     数字掩码生成与校验脚本（Python）
 ├─ _archive/backups/          固件历史快照（.bak_v14 … .bak_v168，共 18 个）
-├─ SmallDesktopDisplay_V1.4.bin   发布固件（可直接烧录）
 ├─ V1.4固件说明.txt             版本变更记录
-├─ display_mockup.png         显示效果示意图
-└─ misaka111.jpg              原项目作者图片
+└─ display_mockup.png         显示效果示意图
 ```
 
 > `_archive/` 已被 `.gitignore` 排除，不会上传到仓库。

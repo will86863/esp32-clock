@@ -29,8 +29,6 @@ bin/
 *.map
 *.hex
 *.bin.tmp
-# 注意：SmallDesktopDisplay_V1.4.bin 是发布固件，需保留（下方取反）
-!SmallDesktopDisplay_V1.4.bin
 
 # Go 上位机编译产物
 *.exe
