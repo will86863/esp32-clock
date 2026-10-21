@@ -40,7 +40,7 @@
  *
  *    感谢群友 @你别失望  提醒发现WiFi保存后无法重置的问题，目前已解决。详情查看更改说明！
  * *****************************************************************/
-#define Version  "SDD V1.6.8"
+#define Version  "SDD V1.6.9"
 /* *****************************************************************
  *  库文件、头文件
  * *****************************************************************/
@@ -128,6 +128,12 @@ WiFiManager wm; // global wm instance
  *
  *  现在：开机只尝试一次（有上限），之后由 wifiTask() 按 1→2→4→…→60 秒退避重连；
  *        已配过网就**绝不**清凭据、也绝不自动进配网门户；门户只能手动进入且 180 秒超时。
+ *
+ *  ⚠️ V1.6.9 补：上面第 2 条的“走不到 Web_Sever_Init()”只是在旧版的死循环里成立；
+ *     V1.6.8 改成“8 秒超时进主循环”后又引入了新的漏洞——setup() 里整个
+ *     `if(WiFi.status()==WL_CONNECTED){ Web_Sever_Init(); }` 被跳过时，server.begin()
+ *     就永远不会执行，而 wifiTask() 重连成功只重建 mDNS。表现为“ping 通、sd3.local
+ *     能解析、TCP 80 却 refused”。详见 httpStart() 上方的长注释。
  * *****************************************************************/
 #define WIFI_BOOT_WAIT_MS   8000UL   //开机最多等 8 秒，超时就先进主循环由状态机续连
 #define WIFI_BACKOFF_MIN    1000UL   //首次重连间隔
@@ -140,11 +146,24 @@ uint32_t wifiNextTryMs      = 0;     //下一次重连的时刻
 uint32_t wifiBackoffMs      = WIFI_BACKOFF_MIN;
 uint8_t  wifiFailCount      = 0;
 bool     webRoutesReady     = false; //HTTP 路由是否已注册（**只能注册一次**）
+bool     httpStarted        = false; //V1.6.9 HTTP 是否已 listen（重入守卫）
 bool     netPortalRequested = false; //网页/串口请求进入配网门户
 void wifiTask();
 void wifiBadgeTask();
 void wifiEnterPortal();
 void wifiBeginConnect();
+/* V1.6.9 幂等启动 HTTP（见 Web_Sever_Init 上方的长注释）。
+ * ⚠️ 声明与定义都必须在 #if WebSever_EN 里面：它用到 server / handleXxx，
+ *    而 wifiTask() 是无条件调用的（WebSever_EN=0 时必须退化成空函数）。
+ * 同理 netUp() 也依赖 MDNS + server，一并处理（V1.6.8 遗留：WebSever_EN=0
+ *     时 netUp() 未定义，wifiTask() 会直接报错）。 */
+#if WebSever_EN
+bool httpStart();
+void netUp();
+#else
+inline bool httpStart() { return false; }   //Web 功能关闭时退化成无操作
+inline void netUp() {}                     //同上
+#endif
 
 //I2C总线引脚（DHT30温湿度传感器与SSD1306 OLED共用）
 #define I2C_SDA 21
@@ -152,29 +171,146 @@ void wifiBeginConnect();
 #include <Wire.h>
 
 #if DHT_EN
-//DHT30(SHT30) I2C温湿度传感器（原DHT11单总线传感器更换为高精度DHT30）
-#define DHT30_ADDR  0x44   //I2C地址：ADDR脚接GND为0x44，接VCC为0x45
+/* ------------------------------------------------------------------
+ *  I2C 温湿度传感器驱动（V1.6.9 重写）
+ *
+ *  背景：原代码只实现了 SHT3x 协议（地址 0x44 / 命令 0x2C06 / 读 6 字节），
+ *        但实际采购并焊在板上的是 ASAIR 系列的 DHT20 / "DHT30"，
+ *        它用的是完全不同的协议：
+ *            地址 0x38，命令 0xAC 0x33 0x00，等待 80ms，读 7 字节
+ *        两者地址、命令、时长、数据长度、换算公式全都不一样，
+ *        所以旧代码在任何情况下都读不到数据，且失败时完全静默。
+ *
+ *  本版做法：
+ *    1) 先按 DHT20/DHT30 协议读（主板实际器件）
+ *    2) 失败再回退到 SHT3x 协议（兼容只焊了 SHT30 的板子）
+ *    3) 两种都失败时打印明确原因到串口，不再静默返回
+ *    4) 读失败时把 t/h 置为 NAN，让显示层能区分"0.0"和"没读到"
+ * ------------------------------------------------------------------ */
+#define DHT20_ADDR      0x38    //ASAIR DHT20 / "DHT30" 固定地址
+#define SHT30_ADDR_GND  0x44    //SHT3x ADDR 接 GND
+#define SHT30_ADDR_VCC  0x45    //SHT3x ADDR 接 VCC
 
-//读取DHT30温湿度，成功返回true
-bool readDHT30(float &t, float &h)
+//上次使用的是哪种协议（0=未确定 1=DHT20 2=SHT3x），避免每次重试
+static uint8_t dhtProtocol = 0;
+
+//SHT3x 使用的 CRC8：多项式 0x31，初值 0xFF（DHT20 用同一算法）
+static uint8_t dhtCrc8(const uint8_t *d, int n)
 {
-  Wire.beginTransmission(DHT30_ADDR);
+  uint8_t crc = 0xFF;
+  for (int i = 0; i < n; i++) {
+    crc ^= d[i];
+    for (int b = 0; b < 8; b++)
+      crc = (crc & 0x80) ? (uint8_t)((crc << 1) ^ 0x31) : (uint8_t)(crc << 1);
+  }
+  return crc;
+}
+
+//读取 DHT20 / DHT30，成功返回 true
+static bool readDHT20(float &t, float &h, const char **why)
+{
+  Wire.beginTransmission(DHT20_ADDR);
+  Wire.write(0xAC);           //触发测量
+  Wire.write(0x33);
+  Wire.write(0x00);
+  if (Wire.endTransmission() != 0) { *why = "DHT20 no ACK"; return false; }
+
+  delay(80);                  //手册要求 >= 80ms
+
+  if (Wire.requestFrom((uint8_t)DHT20_ADDR, (uint8_t)7) != 7) {
+    *why = "DHT20 read short";
+    return false;
+  }
+
+  uint8_t b[7];
+  for (int i = 0; i < 7; i++) b[i] = Wire.read();
+
+  if (dhtCrc8(b, 6) != b[6]) { *why = "DHT20 CRC bad"; return false; }
+
+  //20bit 湿度 + 20bit 温度
+  uint32_t rawH = ((uint32_t)b[1] << 12) | ((uint32_t)b[2] << 4) | (b[3] >> 4);
+  uint32_t rawT = ((uint32_t)(b[3] & 0x0F) << 16) | ((uint32_t)b[4] << 8) | b[5];
+
+  h = (float)rawH * 100.0f / 1048576.0f;          //2^20
+  t = (float)rawT * 200.0f / 1048576.0f - 50.0f;
+  return true;
+}
+
+//读取 SHT3x（兼容旧板），成功返回 true
+static bool readSHT3x(uint8_t addr, float &t, float &h, const char **why)
+{
+  Wire.beginTransmission(addr);
   Wire.write(0x2C);           //单次测量，高重复性，时钟拉伸使能
   Wire.write(0x06);
-  if(Wire.endTransmission() != 0)
+  if (Wire.endTransmission() != 0) { *why = "SHT3x no ACK"; return false; }
+
+  delay(20);
+  if (Wire.requestFrom(addr, (uint8_t)6) != 6) { *why = "SHT3x read short"; return false; }
+
+  uint8_t b[6];
+  for (int i = 0; i < 6; i++) b[i] = Wire.read();
+
+  if (dhtCrc8(&b[0], 2) != b[2] || dhtCrc8(&b[3], 2) != b[4]) {
+    *why = "SHT3x CRC bad";
     return false;
-  delay(20);                  //等待测量完成（约15ms）
-  if(Wire.requestFrom(DHT30_ADDR, (uint8_t)6) != 6)
-    return false;
-  uint16_t rawT = ((uint16_t)Wire.read() << 8) | Wire.read();
-  Wire.read();                //温度CRC（此处不校验）
-  uint16_t rawH = ((uint16_t)Wire.read() << 8) | Wire.read();
-  Wire.read();                //湿度CRC（此处不校验）
-  if(rawT == 0xFFFF || rawH == 0xFFFF)  //传感器未就绪
-    return false;
+  }
+
+  uint16_t rawT = ((uint16_t)b[0] << 8) | b[1];
+  uint16_t rawH = ((uint16_t)b[3] << 8) | b[4];
   t = -45.0f + 175.0f * (float)rawT / 65535.0f;
   h = 100.0f * (float)rawH / 65535.0f;
   return true;
+}
+
+//统一入口：自动识别协议，失败时输出可诊断的原因
+bool readDHT30(float &t, float &h)
+{
+  const char *why = "";
+
+  //先按上次成功的协议试，避免每帧都重新探测
+  if (dhtProtocol == 1) {
+    if (readDHT20(t, h, &why)) return true;
+  } else if (dhtProtocol == 2) {
+    if (readSHT3x(SHT30_ADDR_GND, t, h, &why)) return true;
+    if (readSHT3x(SHT30_ADDR_VCC, t, h, &why)) return true;
+  }
+
+  //未确定或上次失败：完整探测一次
+  if (readDHT20(t, h, &why)) {
+    dhtProtocol = 1;
+    Serial.printf("[DHT] 使用 DHT20/DHT30 @0x%02X  T=%.2fC H=%.2f%%\r\n",
+                  DHT20_ADDR, t, h);
+    return true;
+  }
+  if (readSHT3x(SHT30_ADDR_GND, t, h, &why)) {
+    dhtProtocol = 2;
+    Serial.printf("[DHT] 使用 SHT3x @0x%02X  T=%.2fC H=%.2f%%\r\n",
+                  SHT30_ADDR_GND, t, h);
+    return true;
+  }
+  if (readSHT3x(SHT30_ADDR_VCC, t, h, &why)) {
+    dhtProtocol = 2;
+    Serial.printf("[DHT] 使用 SHT3x @0x%02X  T=%.2fC H=%.2f%%\r\n",
+                  SHT30_ADDR_VCC, t, h);
+    return true;
+  }
+
+  //全部失败：打印原因（限流，避免每秒刷屏）
+  static uint32_t lastErrMs = 0;
+  static uint8_t  errCount  = 0;
+  if (millis() - lastErrMs > 10000UL) {
+    lastErrMs = millis();
+    errCount++;
+    Serial.printf("[DHT] ★读不到传感器 (第%u次) 原因=%s\r\n", errCount, why);
+    Serial.println("[DHT]   检查：1)传感器VDD/GND  2)SDA->GPIO21 SCL->GPIO22");
+    Serial.println("[DHT]         3)DHT20地址应为0x38  4)上拉电阻(OLED自带可满足)");
+    //强制下次重新探测，避免卡在错的协议上
+    dhtProtocol = 0;
+  }
+
+  t = NAN;
+  h = NAN;
+  return false;
 }
 #endif
 
@@ -1899,10 +2035,11 @@ void tempWin()
 
 #if DHT_EN
 //外接DHT30传感器，显示数据
+//V1.6.9 读失败时显示 "--" 而不是误导性的 0.0（原来失败即静默显示 0.0℃/0.0%）
 void IndoorTem()
 {
   float t = 0, h = 0;
-  readDHT30(t, h);
+  bool ok = readDHT30(t, h);
   String s = "内温";
   uint16_t c3 = finalText3();          //V1.6 自动换色后的最终文字色
    /***绘制相关文字***/
@@ -1921,7 +2058,8 @@ void IndoorTem()
   clk.createSprite(60, 24); 
   bgFillSprite(clk,170,184,60,24,c3);   //V1.5 先贴背景
   clk.setTextDatum(CC_DATUM);
-  drawFloatEx(clk, t, 1, 20, 13, c3, bgOutlineOn);
+  if (ok) drawFloatEx(clk, t, 1, 20, 13, c3, bgOutlineOn);
+  else    drawTextEx(clk, "--", 20, 13, c3, bgOutlineOn);   //V1.6.9 读不到就明确显示
   drawTextEx(clk, "℃", 50, 13, c3, bgOutlineOn);
   clk.pushSprite(170,184);
   clk.deleteSprite();
@@ -1930,7 +2068,8 @@ void IndoorTem()
   clk.createSprite(60, 24); 
   bgFillSprite(clk,170,214,60,24,c3);   //V1.5 先贴背景
   clk.setTextDatum(CC_DATUM);
-  drawFloatEx(clk, h, 1, 20, 13, c3, bgOutlineOn);
+  if (ok) drawFloatEx(clk, h, 1, 20, 13, c3, bgOutlineOn);
+  else    drawTextEx(clk, "--", 20, 13, c3, bgOutlineOn);   //V1.6.9
   drawTextEx(clk, "%", 50, 13, c3, bgOutlineOn);
   clk.pushSprite(170,214);
   clk.deleteSprite();
@@ -2278,7 +2417,7 @@ String buildConfigPage()
   h += F("#cTip{color:#cfd6e4;font-size:12px;margin-bottom:12px;}");
   h += F("</style></head><body><div class='wrap'>");
 
-  h += F("<div class='hd'><h1>SDD 控制台</h1><span>V1.6.8</span></div>");
+  h += F("<div class='hd'><h1>SDD 控制台</h1><span>V1.6.9</span></div>");
 
   //=== 显示设置 ===
   h += F("<div class='card'><h2>显示</h2>");
@@ -2540,7 +2679,7 @@ String buildConfigPage()
   h += F("if(inp){inp.value=t.getAttribute('data-v');syncSw(n);}});");
   h += F("</script>");
 
-  h += F("<div class='ft'>SmallDesktopDisplay V1.6.8 · By WCY</div>");
+  h += F("<div class='ft'>SmallDesktopDisplay V1.6.9 · By WCY</div>");
 
   // ==== V1.5.2 裁剪面板 DOM ====
   h += F("<div id='mCrop'><div id='cTip'>拖动方块调整范围 · 滚轮/双指缩放</div>");
@@ -3164,19 +3303,56 @@ void netUp()
   }
 }
 
+/* ==================================================================
+ *  V1.6.9 ★根本修复：HTTP 服务会因为“开机 8 秒没连上”而永远不启动
+ *
+ *  现象：设备在线（ping 通、TTL=64）、sd3.local 能解析、
+ *        _http._tcp 也有 SRV 记录声明端口 80，
+ *        但 TCP 80 直接 ECONNREFUSED —— 后台网页打不开。
+ *
+ *  根因（V1.6.8 引入的回归）：
+ *    setup() 里 `if(WiFi.status()==WL_CONNECTED){ ...Web_Sever_Init()... }`
+ *    把 Web 初始化包在了“本次开机是否当场连上”的条件里；而 V1.6.8 又把
+ *    原来的“死等连上”改成了“最多等 8 秒”。于是：
+ *      开机 8 秒内没连上 -> 整个 if 跳过 -> server.begin() 永不执行
+ *      -> 之后 wifiTask() 退避重连成功 -> 只调 netUp() 重建 mDNS
+ *      -> mDNS 活着、HTTP 却从来没 listen -> 网页永远打不开。
+ *
+ *  修法：把 listen 抽成独立的幂等函数 httpStart()，在这三个地方调用：
+ *    1) Web_Sever_Init()              —— 开机当场连上的快路径
+ *    2) wifiTask() 的重连恢复分支     —— 后台重连成功后补开
+ *    3) Web_Sever() 的懒启动兜底      —— 只要 WiFi 已连就不让它继续睡着
+ *  ⚠️ NetworkServer::begin() 自带 `if (_listening) return;` 守卫，
+ *     重复调用不会泄漏 socket；外层 httpStarted 只是为了让日志与调试清楚。
+ * ================================================================== */
+bool httpStart()
+{
+  if (httpStarted) return true;                     //已启动：幂等返回
+  if (WiFi.status() != WL_CONNECTED) return false;  //没网不能 listen
+
+  webRoutesInit();                                  //路由只注册一次（内部自带守卫）
+  server.begin();
+  httpStarted = true;
+  Serial.println("[V1.6.9] HTTP 服务已开启（listen 0.0.0.0:80）");
+  Serial.print("[V1.6.9] 本地 IP： ");
+  Serial.println(WiFi.localIP());
+  return true;
+}
+
+/* 开机路径：mDNS + HTTP 一起拉起来（保持原有行为） */
 void Web_Sever_Init()
 {
   netUp();
-  webRoutesInit();
-  server.begin();
-  Serial.println("HTTP服务器已开启");
-  Serial.print("本地IP： ");
-  Serial.println(WiFi.localIP());
+  httpStart();
 }
 //Web网页设置函数
 void Web_Sever()
 {
 //  MDNS.update();
+  //V1.6.9 懒启动兜底：只要 WiFi 已连而 HTTP 还没起来，就补一次。
+  //  这两条判断都是纯内存比较，不耗时；放在 handleClient() 之前，
+  //  保证“后台重连成功的那一瞬间”网页就能打开，不用等下一次 Wi-Fi 边沿。
+  if (!httpStarted && WiFi.status() == WL_CONNECTED) httpStart();
   server.handleClient();
 }
 //web服务打开后LCD显示登陆网址及IP
@@ -3516,6 +3692,11 @@ void wifiTask()
       wifiFailCount = 0;
       wifiBadgeErase();
       netUp();                              //netif 变了，mDNS 必须重建
+      /* V1.6.9 ★关键：重连成功后必须补开 HTTP。
+       *   V1.6.8 只重建设 mDNS —— 如果开机 8 秒内没连上，
+       *   setup() 里那段 if 被跳过，server.begin() 就永远不会执行，
+       *   于是 ping 通、sd3.local 能解析、但 80 端口永远 refused。 */
+      httpStart();
       UpdateWeater_en = 1;                  //立刻补拉一次天气
       Hour_sign = Minute_sign = Second_sign = 60;   //强制重绘时钟
       Serial.printf("[V1.6.8] WiFi 已恢复，IP=%s\r\n", WiFi.localIP().toString().c_str());
@@ -3726,13 +3907,28 @@ void setup()
     strcpy(wificonf.stapsw,WiFi.psk().c_str());//密码复制
     savewificonfig();
     readwificonfig();
-    #if WebSever_EN
-    //开启web服务器初始化
-    Web_Sever_Init();
-    Web_sever_Win();
-    delay(10000);
-    #endif
   }
+  #if WebSever_EN
+  /* V1.6.9 ★关键改动：不再把 Web 初始化包在“开机当场连上”的条件里。
+   *
+   *  旧写法（V1.6.8）：
+   *      if(WiFi.status()==WL_CONNECTED){ ... Web_Sever_Init(); Web_sever_Win(); delay(10000); }
+   *  后果：开机 8 秒内没连上 → 整个块跳过 → server.begin() 永不执行
+   *        → 之后重连成功也只重建 mDNS → 网页永远打不开（就是本次的故障）。
+   *
+   *  新写法：
+   *      ① 先无条件调一次 Web_Sever_Init()：里面 netUp() + httpStart() 都是幂等的，
+   *         已连上就立刻 listen；没连上则 httpStart() 直接返回 false（不影响开机）。
+   *      ② 屏幕提示只在已连上时画（没连上屏幕上没有 IP 可展示）。
+   *      ③ 不再 delay(10000) 干等 —— 那是旧版为了让屏幕上的网址停留 10 秒，
+   *         但代价是开机后 10 秒内网页打不开，正好放大了故障观感。
+   *         现在改成只等 2 秒（足够看清提示），HTTP 是异步 handleClient()，不靠这段 delay。
+   *      ④ 真正的兜底在 wifiTask() 与 Web_Sever()：一旦 WiFi 连上就补开。
+   */
+  Web_Sever_Init();
+  if (WiFi.status() == WL_CONNECTED) Web_sever_Win();
+  delay(2000);
+  #endif
 
   // Serial.print("本地IP： ");
   // Serial.println(WiFi.localIP());

@@ -58,3 +58,7 @@ $RECYCLE.BIN/
 config.local.json
 *.local
 *.log
+
+# ---------- 本地诊断/临时产物（不入库） ----------
+_diag/
+.dsh-ops-update-*.lock
