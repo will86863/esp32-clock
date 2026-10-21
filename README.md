@@ -269,41 +269,6 @@ wails build -platform windows/amd64
 
 ---
 
-## 目录结构
-
-```
-esp32-clock/
-├─ SmallDesktopDisplay/          ESP32 固件（Arduino sketch）
-│  ├─ SmallDesktopDisplay.ino      主程序（约 4600 行）
-│  ├─ number.cpp/.h                时钟数字绘制
-│  ├─ weathernum.cpp/.h            天气数字绘制
-│  ├─ oled.h / font8x16.h          OLED 驱动与字库（无外部依赖）
-│  ├─ qr.h                         配网二维码
-│  ├─ font/                        字体头文件（含自定义 vlw 字库）
-│  └─ ESP32_ST7789_240x240_说明.md  详细硬件与固件说明
-│
-├─ GameTime/                     Windows 上位机（Go + Wails v2 + React）
-│  ├─ main.go                      启动、命令行、资源嵌入
-│  ├─ app.go                       暴露给前端的 API
-│  ├─ monitor.go                   监控主循环（进程 → 会话 → UDP）
-│  ├─ protocol.go / session.go     UDP 载荷、最后启动优先逻辑
-│  ├─ winproc.go / steam.go        进程枚举、Steam 库解析
-│  ├─ shortcut.go / icon.go        .lnk 解析、图标提取
-│  ├─ stats.go                     会话统计（JSONL）
-│  ├─ tray.go / autostart.go       托盘、开机自启
-│  ├─ frontend/                    React 18 + Fluent UI v9 + Vite
-│  ├─ assets/                      图标资源
-│  └─ build/bin/GameTime.exe       编译产物（发布版见 Releases）
-│
-├─ docs/
-│  ├─ hardware/                   BOM、PCB 工程、原理图
-│  └─ img/                        README 截图
-│
-└─ tools/                        数字掩码生成与校验脚本（Python）
-```
-
----
-
 ## FAQ
 
 <details>
