@@ -16,21 +16,6 @@
 
 ---
 
-## 下载
-
-| 需要什么 | 下载文件 | 说明 |
-|---|---|---|
-| **游戏时长软件**（Windows） | [**GameTime.exe**](https://github.com/will86863/esp32-clock/releases/latest/download/GameTime.exe) | 免安装单文件，12.7 MB，双击即用 |
-| **固件**（只刷 app，推荐） | [firmware-SDD-V1.6.9.bin](https://github.com/will86863/esp32-clock/releases/latest/download/firmware-SDD-V1.6.9.bin) | 写入 `0x10000`，保留 WiFi/配置/背景图 |
-| **固件**（完整镜像） | [firmware-SDD-V1.6.9-merged-4MB.bin](https://github.com/will86863/esp32-clock/releases/latest/download/firmware-SDD-V1.6.9-merged-4MB.bin) | 写入 `0x0`，适用于全新板 |
-| 烧录脚本 | [flash.bat](https://github.com/will86863/esp32-clock/releases/latest/download/flash.bat) | Windows 一键烧录，免编译 |
-
-全部版本：[Releases](https://github.com/will86863/esp32-clock/releases)
-
-> **只想统计游戏时长？** 下载 `GameTime.exe` 直接跑，不需要 ESP32、不需要编译。
-
----
-
 ## 功能
 
 ### A. 天气时钟（ESP32 固件，独立可用）
@@ -172,6 +157,20 @@ OLED 显示逻辑：有程序运行 → 显示程序名 + `HH:MM:SS`；无程序
 ---
 
 ## 快速开始
+
+### 下载
+
+| 需要什么 | 下载文件 | 说明 |
+|---|---|---|
+| **游戏时长软件**（Windows） | [**GameTime.exe**](https://github.com/will86863/esp32-clock/releases/latest/download/GameTime.exe) | 免安装单文件，12.7 MB，双击即用 |
+| **固件**（只刷 app，推荐） | [firmware-SDD-V1.6.9.bin](https://github.com/will86863/esp32-clock/releases/latest/download/firmware-SDD-V1.6.9.bin) | 写入 `0x10000`，保留 WiFi/配置/背景图 |
+| **固件**（完整镜像） | [firmware-SDD-V1.6.9-merged-4MB.bin](https://github.com/will86863/esp32-clock/releases/latest/download/firmware-SDD-V1.6.9-merged-4MB.bin) | 写入 `0x0`，适用于全新板 |
+| 烧录脚本 | [flash.bat](https://github.com/will86863/esp32-clock/releases/latest/download/flash.bat) | Windows 一键烧录，免编译 |
+
+全部版本：[Releases](https://github.com/will86863/esp32-clock/releases)
+
+> **只想统计游戏时长？** 下载 `GameTime.exe` 直接跑，不需要 ESP32、不需要编译。
+
 
 ### 路径 A：只用天气时钟
 
