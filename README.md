@@ -16,6 +16,21 @@
 
 ---
 
+## 下载
+
+| 需要什么 | 下载文件 | 说明 |
+|---|---|---|
+| **游戏时长软件**（Windows） | [**GameTime.exe**](https://github.com/will86863/esp32-clock/releases/latest/download/GameTime.exe) | 免安装单文件，12.7 MB，双击即用 |
+| **固件**（只刷 app，推荐） | [firmware-SDD-V1.6.9.bin](https://github.com/will86863/esp32-clock/releases/latest/download/firmware-SDD-V1.6.9.bin) | 写入 `0x10000`，保留 WiFi/配置/背景图 |
+| **固件**（完整镜像） | [firmware-SDD-V1.6.9-merged-4MB.bin](https://github.com/will86863/esp32-clock/releases/latest/download/firmware-SDD-V1.6.9-merged-4MB.bin) | 写入 `0x0`，适用于全新板 |
+| 烧录脚本 | [flash.bat](https://github.com/will86863/esp32-clock/releases/latest/download/flash.bat) | Windows 一键烧录，免编译 |
+
+全部版本：[Releases](https://github.com/will86863/esp32-clock/releases)
+
+> **只想统计游戏时长？** 下载 `GameTime.exe` 直接跑，不需要 ESP32、不需要编译。
+
+---
+
 ## 功能
 
 ### A. 天气时钟（ESP32 固件，独立可用）
@@ -37,6 +52,9 @@
 </p>
 
 ### B. 游戏时长记录（GameTime 桌面程序，独立可用）
+
+> **开箱即用**：下载 [`GameTime.exe`](https://github.com/will86863/esp32-clock/releases/latest/download/GameTime.exe)
+> 双击就能跑，免安装、无需 ESP32、无需编译。
 
 - **监控指定程序**：支持 `.exe` / `.lnk` / `.url`，可直接拖入窗口添加
 - **「最后启动优先」**：同时添加多个程序，只显示最后启动的那个
@@ -158,20 +176,33 @@ OLED 显示逻辑：有程序运行 → 显示程序名 + `HH:MM:SS`；无程序
 
 ### 路径 A：只用天气时钟
 
+**烧录固件**（二选一）：
+
+- **免编译（推荐）**：下载 [`flash.bat`](https://github.com/will86863/esp32-clock/releases/latest/download/flash.bat) 与
+  [`firmware-SDD-V1.6.9.bin`](https://github.com/will86863/esp32-clock/releases/latest/download/firmware-SDD-V1.6.9.bin) 放同一目录，双击 `flash.bat`，按提示输入串口号
+- **从源码**：用 Arduino IDE 打开 `SmallDesktopDisplay/SmallDesktopDisplay.ino`，
+  开发板选 **ESP32 Dev Module**，分区方案选 **Huge APP (3MB No OTA/1MB SPIFFS)**，然后上传
+
+**首次启动**：
+
 1. 按上方接线表连接 TFT + DHT30（OLED 可选）
-2. 用 Arduino IDE 打开 `SmallDesktopDisplay/SmallDesktopDisplay.ino`
-3. 开发板选 **ESP32 Dev Module**，分区方案选 **Huge APP (3MB No OTA/1MB SPIFFS)**
-4. 烧录。首次开机会自动开启热点 `AutoConnectAP`，手机连上后选 WiFi、填密码
-5. 屏幕显示 `http://sd3.local` 后，浏览器访问即可进入控制台
+2. 通电。首次开机自动开热点 `AutoConnectAP`（无密码），手机连上后选 WiFi、填密码
+3. 屏幕显示 `http://sd3.local` 后，浏览器访问即可进入控制台
+
+> ⚠️ 烧录时若报 `Wrong boot mode (0x17)`：按住 **BOOT** → 点一下 **RST** → 松 RST → 松 BOOT。
+> 若插 USB 就反复重启，是供电不足，**先接外部 5V 电源**再烧。
 
 ### 路径 B：只用游戏时长统计
 
-1. 下载 [Releases](https://github.com/will86863/esp32-clock/releases) 里的 `GameTime.exe`
+1. 到 [Releases](https://github.com/will86863/esp32-clock/releases/latest) 下载 **`GameTime.exe`**（单文件，无需安装）
 2. 双击运行，常驻托盘
 3. 「程序」页 → 点「选择程序…」或**直接把快捷方式拖进窗口**
 4. 「统计」页查看今日/近 7 天/近 30 天使用时长
 
 > 不接 ESP32 也完全可用 —— 它本身就是一个独立的程序使用时长统计工具。
+
+**系统要求**：Windows 10 21H2+ / Windows 11（依赖系统自带 WebView2，两者均已预装）。
+软件为免安装单文件，配置与统计数据存在 `%APPDATA%\GameTime\`，删除 exe 即可卸载。
 
 ### 路径 C：组合使用
 
@@ -203,6 +234,9 @@ arduino-cli compile \
 > 项目内的 `libraries/` 是**过期快照**，不参与编译，改它不会有任何效果。
 
 ### 上位机（GameTime）
+
+> 普通用户**不需要编译** —— 直接下载 [Releases](https://github.com/will86863/esp32-clock/releases/latest)
+> 里的 `GameTime.exe` 即可。以下仅为开发者说明。
 
 需要 Go 1.21+ 与 [Wails v2](https://wails.io)：
 
@@ -260,7 +294,8 @@ esp32-clock/
 │  ├─ stats.go                     会话统计（JSONL）
 │  ├─ tray.go / autostart.go       托盘、开机自启
 │  ├─ frontend/                    React 18 + Fluent UI v9 + Vite
-│  └─ assets/                      图标资源
+│  ├─ assets/                      图标资源
+│  └─ build/bin/GameTime.exe       编译产物（发布版见 Releases）
 │
 ├─ docs/
 │  ├─ hardware/                   BOM、PCB 工程、原理图
