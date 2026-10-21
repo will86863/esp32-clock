@@ -358,7 +358,8 @@ GameTime 未运行、ESP32 IP 填错、或超过 5 秒没收到 UDP 数据。检
 
 - 原项目：**SmallDesktopDisplay**
 - by **Misaka** **微车游**
-- 此项目和GimeTime程序：**will86863*
+- 此项目和GimeTime程序：
+- by **will86863**
 ## License
 
 MIT
