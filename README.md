@@ -1,6 +1,6 @@
 # ESP32 Clock · 天气时钟 & 游戏时长监视器
 
-一块 **ESP32** 驱动的桌面小屏：左边是天气时钟，右边是电脑游戏/软件使用时长记录。
+一块 **ESP32** 驱动的桌面小屏：右边是天气时钟，左边是电脑游戏/软件使用时长记录。
 两个功能**可以单独使用，也可以组合使用** —— 只烧固件就是纯天气时钟，只跑 GameTime 就是纯时长统计工具。
 
 <p align="center">
@@ -104,8 +104,7 @@ OLED 显示逻辑：有程序运行 → 显示程序名 + `HH:MM:SS`；无程序
 
 > 📎 完整 BOM 与 PCB 工程文件见 [`docs/hardware/`](docs/hardware/)：
 > `BOM.xlsx`（立创商城物料）、`espclock_2026-10-21.epro2`（嘉立创 EDA 工程，可自行打板）
->
-> **不需要打板** —— 所有器件用杜邦线连接即可正常工作，下文接线表同样适用散件方案。
+>由于作者不会画PCB，所以目前只画了个充当转接的板子，如果有成品esp32模块可以打作者的PCB板或者直接杜邦线连接，可能有时间会学一下之后画个包含esp模块的板子，原理图也是
 
 <p align="center">
   <img src="docs/hardware/pcb-preview.png" width="720" alt="PCB 原理图">
@@ -357,9 +356,9 @@ GameTime 未运行、ESP32 IP 填错、或超过 5 秒没收到 UDP 数据。检
 
 ## 致谢
 
-- 原项目：**SmallDesktopDisplay** by **Misaka**
-- 二次开发与 GameTime 上位机：**微车游** / will86863
-
+- 原项目：**SmallDesktopDisplay**
+- by **Misaka** **微车游**
+- 此项目和GimeTime程序：**will86863*
 ## License
 
 MIT
